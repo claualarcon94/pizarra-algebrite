@@ -108,10 +108,28 @@ function toLatex(algExpr) {
   if (r) {
     r = r.replace(/^"|"$/g, '').trim();
     if (!r.startsWith('latex(') && !r.includes('Error')) {
+      r = r.replace(/\\abs\{([^}]+)\}/g, '|$1|');
+      r = r.replace(/\\frac\{1\}\{([^{}]+)\}/g, (match, inner) => `\\sqrt{${inner}}`);
+      r = r.replace(/\\sqrt\{([^{}]+)\}/g, (match, inner) => `\\sqrt{${inner}}`);
+      r = r.replace(/\^\\frac\{1\}\{(\d+)\}/g, (match, n) => {
+        return '';
+      });
+      r = r.replace(/(\d+)\s*\^\s*\\frac\{1\}\{(\d+)\}/g, (match, base, n) => {
+        if (n === '2') return `\\sqrt{${base}}`;
+        return `\\sqrt[${n}]{${base}}`;
+      });
+      r = r.replace(/\\sqrt\{(\d+)\}\s*\^\s*\\frac\{1\}\{(\d+)\}/g, (match, base, n) => {
+        if (n === '2') return `\\sqrt{${base}}`;
+        return `\\sqrt[${n}]{${base}}`;
+      });
+      r = r.replace(/\^\\frac\{1\}\{(\d+)\}/g, (match, n) => {
+        if (n === '2') return '';
+        return `^{1/${n}}`;
+      });
       return r;
     }
   }
-  return algExpr.replace(/\*/g, '');
+  return algExpr.replace(/\*/g, '').replace(/abs\(([^)]+)\)/g, '|$1|').replace(/sqrt\(([^)]+)\)/g, '\\sqrt{$1}');
 }
 
 function buildApplyLatex(lhsAlg, rhsAlg, op, rawVal) {
@@ -189,8 +207,9 @@ function processInstruction(text) {
       }
 
       case 'simplify': {
-        const newLhs = runAlg(`simplify(${alg.lhs})`);
-        const newRhs = runAlg(`simplify(${alg.rhs})`);
+        const hasSqrtNum = expr => /sqrt\(\d+\)/.test(expr);
+        const newLhs = hasSqrtNum(alg.lhs) ? alg.lhs : runAlg(`simplify(${alg.lhs})`);
+        const newRhs = hasSqrtNum(alg.rhs) ? alg.rhs : runAlg(`simplify(${alg.rhs})`);
         if (!newLhs || !newRhs) return { error: 'No se pudo simplificar.' };
         const done = isSolved(newLhs, newRhs);
         return {
