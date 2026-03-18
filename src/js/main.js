@@ -85,7 +85,17 @@ function isNewEquation(text) {
 function toAlg(str) {
   return str.trim()
     .replace(/\s+/g, '')
-    .replace(/(\d)([a-zA-Z])/g, '$1*$2');
+    .replace(/(\d)([a-zA-Z])/g, '$1*$2')
+    .replace(/(\d)(\!)/g, '$1$2');
+}
+
+function normalizeUserInput(str) {
+  return str
+    .replace(/\bfactorial\b/gi, '!')
+    .replace(/\bal\s+cubo\b/gi, '^3')
+    .replace(/\bal\s+cuadrado\b/gi, '^2')
+    .replace(/\bcuadrado\b/gi, '^2')
+    .replace(/\bcubo\b/gi, '^3');
 }
 
 function runAlg(expr) {
@@ -122,7 +132,9 @@ function buildEqLatex(lhsAlg, rhsAlg) {
 function isSolved(lhsAlg, rhsAlg) {
   const l = (runAlg(`simplify(${lhsAlg})`) || '').trim();
   const r = (runAlg(`simplify(${rhsAlg})`) || '').trim();
-  return /^[a-zA-Z]$/.test(l) && !/[a-zA-Z]/.test(r);
+  const solvedLeft = /^[a-zA-Z]$/.test(l) && !/[a-zA-Z]/.test(r);
+  const solvedRight = !/[a-zA-Z]/.test(l) && /^[a-zA-Z]$/.test(r);
+  return solvedLeft || solvedRight;
 }
 
 function processInstruction(text) {
@@ -155,7 +167,7 @@ function processInstruction(text) {
     switch (cmd.mode) {
 
       case 'apply': {
-        const rawVal = match[cmd.valueGroup].trim();
+        const rawVal = normalizeUserInput(match[cmd.valueGroup].trim());
         const valAlg = toAlg(rawVal);
         let newLhs, newRhs;
         if (cmd.op === '/') {
