@@ -71,11 +71,19 @@ const COMMANDS = [
     regex: /^(?:ra[íi]z(?:\s+cuadrada)?|sqrt|racionaliza)$/i,
     mode: 'sqrt',
   },
+  {
+    id: 'separa',
+    label: () => 'Separa integral en sumas',
+    aliases: ['separa', 'separar'],
+    regex: /^(?:separa(?:r)?)$/i,
+    mode: 'separate',
+  },
 ];
 
 let state = {
   steps: [],
   currentAlg: null,
+  currentIntegral: null,
 };
 
 function normalizeMathFunction(expr) {
@@ -135,6 +143,205 @@ function normalizeMathFunction(expr) {
   return result;
 }
 
+function parseIntegral(text) {
+  const t = text.toLowerCase().trim();
+  
+  const definitePattern = /^(?:integral|int|∫)\s*(?:de\s+)?(.+?)\s+a\s+(.+?)\s+de\s+(.+?)\s*dx?$/i;
+  const matchDef = t.match(definitePattern);
+  if (matchDef) {
+    const lower = matchDef[1].trim();
+    const upper = matchDef[2].trim();
+    const integrand = matchDef[3].trim();
+    return {
+      type: 'definite',
+      integrand: integrand,
+      lower: isNaN(lower) ? lower : parseFloat(lower),
+      upper: isNaN(upper) ? upper : parseFloat(upper),
+    };
+  }
+  
+  const indefinitePattern = /^(?:integral|int|∫)\s*(?:de\s+)?(.+?)\s*dx?$/i;
+  const matchIndef = t.match(indefinitePattern);
+  if (matchIndef) {
+    return {
+      type: 'indefinite',
+      integrand: matchIndef[1].trim(),
+    };
+  }
+  
+  return null;
+}
+
+function isIntegral(text) {
+  return parseIntegral(text) !== null;
+}
+
+function toIntegralLatex(integral) {
+  const algForm = toAlg(integral.integrand);
+  const integrandLatex = toLatex(algForm);
+  if (integral.type === 'definite') {
+    return `\\int_{${integral.lower}}^{${integral.upper}} ${integrandLatex}\\,dx`;
+  }
+  return `\\int ${integrandLatex}\\,dx`;
+}
+
+function processIntegralCommand(text, integral) {
+  for (const cmd of COMMANDS) {
+    const match = text.match(cmd.regex);
+    if (!match) continue;
+
+    switch (cmd.mode) {
+      case 'apply': {
+        const rawVal = normalizeUserInput(match[cmd.valueGroup].trim());
+        const valAlg = toAlg(rawVal);
+        let newIntegrand;
+        if (cmd.op === '/') {
+          newIntegrand = `(${integral.integrand})/(${valAlg})`;
+        } else if (cmd.op === '*') {
+          newIntegrand = `(${integral.integrand})*(${valAlg})`;
+        } else {
+          newIntegrand = `${integral.integrand}${cmd.op}(${valAlg})`;
+        }
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        const newLatex = cmd.op === '+' 
+          ? `\\int ${toLatex(newIntegrand)}\\,dx = \\int ${toLatex(integral.integrand)}\\,dx ${cmd.op === '+' ? '+' : ''} ${rawVal}`
+          : cmd.op === '-'
+          ? `\\int ${toLatex(newIntegrand)}\\,dx = \\int ${toLatex(integral.integrand)}\\,dx - ${rawVal}`
+          : cmd.op === '*'
+          ? `\\int ${toLatex(newIntegrand)}\\,dx = ${rawVal}\\left(\\int ${toLatex(integral.integrand)}\\,dx\\right)`
+          : `\\int ${toLatex(newIntegrand)}\\,dx = \\dfrac{\\int ${toLatex(integral.integrand)}\\,dx}{${rawVal}}`;
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(rawVal),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'simplify': {
+        const algForm = toAlg(integral.integrand);
+        const newIntegrand = runAlg(`simplify(${algForm})`);
+        if (!newIntegrand) return { error: 'No se pudo simplificar.' };
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'expand': {
+        const algForm = toAlg(integral.integrand);
+        const newIntegrand = runAlg(`expand(${algForm})`);
+        if (!newIntegrand) return { error: 'No se pudo expandir.' };
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'factor': {
+        const algForm = toAlg(integral.integrand);
+        const newIntegrand = runAlg(`factor(${algForm})`);
+        if (!newIntegrand) return { error: 'No se pudo factorizar.' };
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'solve': {
+        const algForm = toAlg(integral.integrand);
+        const varName = cmd.getVar ? cmd.getVar(match) : 'x';
+        const result = runAlg(`integrate(${algForm},${varName})`);
+        if (!result || result.includes('Error')) return { error: 'No se pudo integrar.' };
+        const resultLatex = toLatex(result);
+        let finalLatex;
+        if (integral.type === 'definite') {
+          const lowerVal = runAlg(`${result}|${varName}=${integral.upper}`);
+          const upperVal = runAlg(`${result}|${varName}=${integral.lower}`);
+          const evaluated = runAlg(`(${lowerVal})-(${upperVal})`);
+          finalLatex = toLatex(evaluated);
+        } else {
+          finalLatex = `${resultLatex}+C`;
+        }
+        return {
+          latex: finalLatex,
+          annotation: 'Integral resuelta',
+          newIntegral: null,
+          done: true,
+        };
+      }
+
+      case 'power': {
+        const exp = cmd.getVal ? cmd.getVal(match) : '2';
+        const newIntegrand = `(${integral.integrand})^(${exp})`;
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(exp),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'sqrt': {
+        const newIntegrand = `sqrt(${integral.integrand})`;
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'separate': {
+        const terms = [];
+        let current = '';
+        let parenDepth = 0;
+        
+        for (const char of integral.integrand) {
+          if (char === '(') parenDepth++;
+          else if (char === ')') parenDepth--;
+          else if (char === '+' && parenDepth === 0) {
+            if (current.trim()) terms.push(current.trim());
+            current = '';
+            continue;
+          }
+          current += char;
+        }
+        if (current.trim()) terms.push(current.trim());
+        
+        if (terms.length <= 1) {
+          return { error: 'No hay términos separados para descomponer.' };
+        }
+        
+        const separatedLatex = terms.map(term => {
+          const newInt = { ...integral, integrand: term };
+          return toIntegralLatex(newInt);
+        }).join(' + ');
+        
+        return {
+          latex: separatedLatex,
+          annotation: 'Separa integral en sumas',
+          newIntegral: null,
+          done: false,
+        };
+      }
+    }
+  }
+
+  return { error: `No reconocí "${text}". Prueba: simplifica, suma X, resta X, etc.` };
+}
+
 function isNewEquation(text) {
   return text.includes('=');
 }
@@ -192,14 +399,6 @@ function runAlg(expr) {
   catch(e) { console.error('Algebrite:', e); return null; }
 }
 
-function renderKatex(latex) {
-  try {
-    return katex.renderToString(latex, { throwOnError: false, displayMode: false });
-  } catch(e) {
-    return `<span style="color:var(--chalk-dim)">${latex}</span>`;
-  }
-}
-
 function toLatex(algExpr) {
   let r = runAlg(`latex(${algExpr})`);
   if (r) {
@@ -229,9 +428,8 @@ function toLatex(algExpr) {
     .replace(/abs\(([^)]+)\)/g, '|$1|')
     .replace(/(\w+)\^1\/2/g, 'sqrt($1)')
     .replace(/(\w+)\^\(1\/2\)/g, 'sqrt($1)')
-    .replace(/sqrt\(([^)]+)\)/g, '\\sqrt{$1}')
+    .replace(/sqrt\(([^)]+)\)/g, '\\sqrt{$1}');
 }
-
 
 function buildApplyLatex(lhsAlg, rhsAlg, op, rawVal) {
   const lhs = toLatex(lhsAlg);
@@ -258,25 +456,46 @@ function isSolved(lhsAlg, rhsAlg) {
 
 function processInstruction(text) {
   text = text.trim();
-  const isCommand = COMMANDS.some(cmd => cmd.regex.test(text));
 
-  if (state.currentAlg && isCommand) {
+  if (isNewEquation(text)) {
+    const parts = text.split('=');
+    if (parts.length !== 2) return { error: 'Formato inválido. Ejemplo: 2x+5=10' };
+    const lhsNorm = normalizeMathFunction(parts[0]);
+    const rhsNorm = normalizeMathFunction(parts[1]);
+    const lhsAlg = toAlg(lhsNorm);
+    const rhsAlg = toAlg(rhsNorm);
+    return {
+      latex: buildEqLatex(lhsAlg, rhsAlg),
+      annotation: 'Ecuación',
+      newAlg: { lhs: lhsAlg, rhs: rhsAlg },
+      isNew: true,
+      done: false,
+    };
+  }
+
+  const integral = parseIntegral(text);
+  if (integral) {
+    return {
+      latex: toIntegralLatex(integral),
+      annotation: integral.type === 'definite' ? 'Integral definida' : 'Integral indefinida',
+      newIntegral: integral,
+      isNew: true,
+      done: false,
+    };
+  }
+
+  if (state.currentAlg) {
     return processEquationCommand(text, state.currentAlg);
   }
 
-  const norm = normalizeMathFunction(normalizeFraction(text));
-  const algExpr = toAlg(norm);
-  return {
-    latex: toLatex(algExpr),
-    annotation: 'Expresión',
-    newAlg: { lhs: algExpr, rhs: '0' },
-    isNew: true,
-    done: false,
-  };
+  if (state.currentIntegral) {
+    return processIntegralCommand(text, state.currentIntegral);
+  }
+
+  return { error: 'Escribe una ecuación (ej: 2x+5=10) o integral (ej: integral de x^2 dx)' };
 }
 
 function processEquationCommand(text, alg) {
-  const isExpressionOnly = alg.rhs === '0';
 
   for (const cmd of COMMANDS) {
     const match = text.match(cmd.regex);
@@ -290,22 +509,16 @@ function processEquationCommand(text, alg) {
         let newLhs, newRhs;
         if (cmd.op === '/') {
           newLhs = `(${alg.lhs})/(${valAlg})`;
-          newRhs = isExpressionOnly ? '0' : `(${alg.rhs})/(${valAlg})`;
+          newRhs = `(${alg.rhs})/(${valAlg})`;
         } else if (cmd.op === '*') {
           newLhs = `(${alg.lhs})*(${valAlg})`;
-          newRhs = isExpressionOnly ? '0' : `(${alg.rhs})*(${valAlg})`;
+          newRhs = `(${alg.rhs})*(${valAlg})`;
         } else {
           newLhs = `${alg.lhs}${cmd.op}(${valAlg})`;
-          newRhs = isExpressionOnly ? '0' : `${alg.rhs}${cmd.op}(${valAlg})`;
+          newRhs = `${alg.rhs}${cmd.op}(${valAlg})`;
         }
-        const buildLatex = (newLhs, newRhs) => {
-          if (isExpressionOnly) {
-            return toLatex(newLhs);
-          }
-          return `${toLatex(newLhs)}=${toLatex(newRhs)}`;
-        };
         return {
-          latex: isExpressionOnly ? toLatex(newLhs) : buildLatex(alg.lhs, alg.rhs, cmd.op, rawVal),
+          latex: buildApplyLatex(alg.lhs, alg.rhs, cmd.op, rawVal),
           annotation: cmd.label(rawVal),
           newAlg: { lhs: newLhs, rhs: newRhs },
           done: false,
@@ -313,38 +526,65 @@ function processEquationCommand(text, alg) {
       }
 
       case 'simplify': {
-        const newLhs = runAlg(`simplify(${alg.lhs})`);
-        const newRhs = isExpressionOnly ? '0' : runAlg(`simplify(${alg.rhs})`);
+        const hasSqrtNum = expr => /sqrt\(\d+\)/.test(expr);
+        const newLhs = hasSqrtNum(alg.lhs) ? alg.lhs : runAlg(`simplify(${alg.lhs})`);
+        const newRhs = hasSqrtNum(alg.rhs) ? alg.rhs : runAlg(`simplify(${alg.rhs})`);
         if (!newLhs || !newRhs) return { error: 'No se pudo simplificar.' };
-        const latex = isExpressionOnly ? toLatex(newLhs) : `${toLatex(newLhs)}=${toLatex(newRhs)}`;
+        const done = isSolved(newLhs, newRhs);
         return {
-          latex,
+          latex: buildEqLatex(newLhs, newRhs),
           annotation: cmd.label(),
           newAlg: { lhs: newLhs, rhs: newRhs },
-          done: false,
+          done,
         };
       }
 
       case 'expand': {
-        const newLhs = runAlg(`expand(${alg.lhs})`);
-        const newRhs = isExpressionOnly ? '0' : runAlg(`expand(${alg.rhs})`);
-        if (!newLhs) return { error: 'No se pudo expandir.' };
-        const latex = isExpressionOnly ? toLatex(newLhs) : `${toLatex(newLhs)}=${toLatex(newRhs)}`;
+        let newLhs = runAlg(`expand(${alg.lhs})`);
+        let newRhs = runAlg(`expand(${alg.rhs})`);
+        let latexLhs = newLhs;
+        let latexRhs = newRhs;
+        
+        function expandFactorial(expr) {
+          return expr.replace(/(\d+)!/g, (match, num) => {
+            const n = parseInt(num);
+            return Array.from({length: n}, (_, i) => n - i).join('\\cdot ');
+          });
+        }
+        
+        if (alg.lhs.includes('!')) {
+          latexLhs = expandFactorial(alg.lhs);
+        }
+        if (alg.rhs.includes('!')) {
+          latexRhs = expandFactorial(alg.rhs);
+        }
+        if (!newLhs || !newRhs) return { error: 'No se pudo expandir.' };
+        const latex = `${latexLhs}=${latexRhs}`;
         return {
           latex,
           annotation: cmd.label(),
-          newAlg: { lhs: newLhs, rhs: newRhs },
+          newAlg: { lhs: alg.lhs, rhs: alg.rhs },
           done: false,
         };
       }
 
+function isNumberOnly(expr) {
+  return /^-?\d+(\.\d+)?$/.test(expr);
+}
+
       case 'factor': {
-        const newLhs = runAlg(`factor(simplify(${alg.lhs}))`);
-        const newRhs = isExpressionOnly ? '0' : runAlg(`factor(simplify(${alg.rhs}))`);
-        if (!newLhs) return { error: 'No se pudo factorizar.' };
-        const latex = isExpressionOnly ? toLatex(newLhs) : `${toLatex(newLhs)}=${toLatex(newRhs)}`;
+        const shouldFactorLhs = !isNumberOnly(alg.lhs);
+        const shouldFactorRhs = !isNumberOnly(alg.rhs);
+        const lhsExpr = shouldFactorLhs ? `factor(simplify(${alg.lhs}))` : alg.lhs;
+        const rhsExpr = shouldFactorRhs ? `factor(simplify(${alg.rhs}))` : alg.rhs;
+        const newLhs = shouldFactorLhs ? runAlg(lhsExpr) : alg.lhs;
+        const newRhs = shouldFactorRhs ? runAlg(rhsExpr) : alg.rhs;
+        if (!newLhs || !newRhs) return { error: 'No se pudo factorizar.' };
+        if (!shouldFactorLhs && !shouldFactorRhs) {
+          return { error: 'No hay términos algebraicos para factorizar.' };
+        }
         return {
-          latex,
+          latex: buildEqLatex(newLhs, newRhs),
           annotation: cmd.label(),
           newAlg: { lhs: newLhs, rhs: newRhs },
           done: false,
@@ -352,12 +592,13 @@ function processEquationCommand(text, alg) {
       }
 
       case 'solve': {
-        const varName = cmd.getVar ? cmd.getVar(match) : 'x';
-        const diff = isExpressionOnly ? alg.lhs : `(${alg.lhs})-(${alg.rhs})`;
-        const result = runAlg(`roots(${diff},${varName})`);
+        const varName = cmd.getVar(match);
+        const diff    = `(${alg.lhs})-(${alg.rhs})`;
+        const result  = runAlg(`roots(${diff},${varName})`);
+        console.log('roots result:', result);
         if (!result || result === '0') return { error: `No se pudo resolver para ${varName}.` };
         return {
-          latex: isExpressionOnly ? toLatex(result) : `${varName}=${toLatex(result)}`,
+          latex: `${varName}=${toLatex(result)}`,
           annotation: cmd.label(varName),
           newAlg: { lhs: varName, rhs: result },
           done: true,
@@ -365,54 +606,114 @@ function processEquationCommand(text, alg) {
       }
 
       case 'power': {
-        const exp = cmd.getVal ? cmd.getVal(match) : '2';
-        const newLhs = `(${alg.lhs})^(${exp})`;
-        const newRhs = isExpressionOnly ? '0' : `(${alg.rhs})^(${exp})`;
-        const latex = isExpressionOnly ? toLatex(newLhs) : `${toLatex(newLhs)}=${toLatex(newRhs)}`;
+        const exp    = cmd.getVal(match);
+        const expAlg = toAlg(exp);
         return {
-          latex,
+          latex: `\\left(${toLatex(alg.lhs)}\\right)^{${exp}}=\\left(${toLatex(alg.rhs)}\\right)^{${exp}}`,
           annotation: cmd.label(exp),
-          newAlg: { lhs: newLhs, rhs: newRhs },
+          newAlg: { lhs: `(${alg.lhs})^(${expAlg})`, rhs: `(${alg.rhs})^(${expAlg})` },
           done: false,
         };
       }
 
       case 'sqrt': {
-        const newLhs = `sqrt(${alg.lhs})`;
-        const newRhs = isExpressionOnly ? '0' : `sqrt(${alg.rhs})`;
-        const latex = isExpressionOnly ? toLatex(newLhs) : `${toLatex(newLhs)}=${toLatex(newRhs)}`;
         return {
-          latex,
+          latex: `\\sqrt{${toLatex(alg.lhs)}}=\\sqrt{${toLatex(alg.rhs)}}`,
           annotation: cmd.label(),
-          newAlg: { lhs: newLhs, rhs: newRhs },
+          newAlg: { lhs: `sqrt(${alg.lhs})`, rhs: `sqrt(${alg.rhs})` },
           done: false,
         };
       }
     }
   }
 
-  return { error: `No reconocí "${text}". Comandos: ${COMMANDS.map(c => c.id).join(', ')}` };
+  return {
+    error: `No reconocí "${text}". Comandos: ${COMMANDS.map(c => c.id).join(', ')}`,
+  };
 }
 
-function processFraction(text) {
-  const overMatch = text.match(/^(.+?)\s+(?:sobre|dividido\s+por|entre)\s+(.+)$/i);
-  if (overMatch) {
-    return {
-      numerator: overMatch[1].trim(),
-      denominator: overMatch[2].trim(),
-    };
+function renderKatex(latex) {
+  try {
+    return katex.renderToString(latex, { throwOnError: false, displayMode: false });
+  } catch(e) {
+    return `<span style="color:var(--chalk-dim)">${latex}</span>`;
   }
-  return null;
 }
 
-function normalizeFraction(text) {
-  const frac = processFraction(text);
-  if (frac) {
-    const numAlg = toAlg(frac.numerator);
-    const denAlg = toAlg(frac.denominator);
-    return `(${numAlg})/(${denAlg})`;
+function addStepToDOM(step) {
+  const container = document.getElementById('steps');
+  const isFirst   = state.steps.length === 1;
+  const div       = document.createElement('div');
+  div.className   = `step${step.done ? ' solved' : ''}${isFirst ? ' initial' : ''}`;
+
+  const eqDiv = document.createElement('div');
+  eqDiv.className = 'step-eq';
+  eqDiv.innerHTML = renderKatex(step.latex);
+
+  const annDiv = document.createElement('div');
+  annDiv.className = 'step-annotation';
+  annDiv.textContent = step.annotation;
+
+  div.appendChild(eqDiv);
+  div.appendChild(annDiv);
+  container.appendChild(div);
+
+  if (step.done) {
+    const badge = document.createElement('div');
+    badge.className = 'solved-badge';
+    badge.innerHTML = '✓ &nbsp;Ecuación resuelta';
+    container.appendChild(badge);
   }
-  return text;
+
+  document.getElementById('emptyState').style.display = 'none';
+  const board = document.getElementById('board');
+  setTimeout(() => board.scrollTop = board.scrollHeight, 80);
+}
+
+function showBoardError(msg) {
+  const container = document.getElementById('steps');
+  const div = document.createElement('div');
+  div.className = 'board-error';
+  div.textContent = '⚠ ' + msg;
+  container.appendChild(div);
+  document.getElementById('board').scrollTop = 99999;
+  setTimeout(() => div.remove(), 5000);
+}
+
+function clearBoard() {
+  state.steps = [];
+  state.currentAlg = null;
+  state.currentIntegral = null;
+  document.getElementById('steps').innerHTML = '';
+  document.getElementById('emptyState').style.display = 'flex';
+}
+
+function handleSend() {
+  const input = document.getElementById('userInput');
+  const text  = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  const result = processInstruction(text);
+
+  if (result.error) {
+    showBoardError(result.error);
+    return;
+  }
+
+
+
+  if (result.newIntegral) {
+    state.currentIntegral = result.newIntegral;
+    state.currentAlg = null;
+  } else if (result.newAlg) {
+    state.currentAlg = result.newAlg;
+    state.currentIntegral = null;
+  }
+
+  const step = { latex: result.latex, annotation: result.annotation, done: !!result.done };
+  state.steps.push(step);
+  addStepToDOM(step);
 }
 
 function useSuggestion(text) {
@@ -420,29 +721,12 @@ function useSuggestion(text) {
   document.getElementById('userInput').focus();
 }
 
-function handleSend() {
-  const input = document.getElementById('userInput');
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = '';
-
-  const result = processInstruction(text);
-
-  if (result.error) {
-    alert(result.error);
-    return;
-  }
-
-  if (result.newAlg) {
-    state.currentAlg = result.newAlg;
-  }
-
-  const step = { latex: result.latex, annotation: result.annotation, done: !!result.done };
-  addStepToDOM(step);
-}
+document.getElementById('userInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') handleSend();
+});
 
 function buildUI() {
-  const suggestions = ['x^2+2x', '3x+7=22', '(x+1)(x-1)', 'simplifica', 'expande'];
+  const suggestions = ['integral de seno de x dx', 'integral de logaritmo de x dx', 'integral de exponencial de x dx', 'seno de x = 0', 'simplifica', 'resuelve'];
   const sugRow = document.getElementById('suggestionsRow');
   suggestions.forEach(s => {
     const chip = document.createElement('span');
@@ -459,39 +743,6 @@ function buildUI() {
     row.innerHTML = `<span class="cmd-key">${cmd.id}</span><span class="cmd-desc">${cmd.aliases.join(' · ')}</span>`;
     grid.appendChild(row);
   });
-}
-
-function addStepToDOM(step) {
-  const container = document.getElementById('steps');
-  const div = document.createElement('div');
-  div.className = 'step';
-  const eqDiv = document.createElement('div');
-  eqDiv.className = 'step-eq';
-  eqDiv.innerHTML = renderKatex(step.latex);
-  const annDiv = document.createElement('div');
-  annDiv.className = 'step-annotation';
-  annDiv.textContent = step.annotation;
-  div.appendChild(eqDiv);
-  div.appendChild(annDiv);
-  container.appendChild(div);
-  document.getElementById('emptyState').style.display = 'none';
-}
-
-function undoLast() {
-  if (state.steps.length === 0) return;
-  state.steps.pop();
-  document.getElementById('steps').lastChild?.remove();
-  if (state.steps.length === 0) {
-    state.currentAlg = null;
-    document.getElementById('emptyState').style.display = 'flex';
-  }
-}
-
-function clearBoard() {
-  state.steps = [];
-  state.currentAlg = null;
-  document.getElementById('steps').innerHTML = '';
-  document.getElementById('emptyState').style.display = 'flex';
 }
 
 buildUI();
