@@ -111,25 +111,28 @@ function toLatex(algExpr) {
       r = r.replace(/\\abs\{([^}]+)\}/g, '|$1|');
       r = r.replace(/\\frac\{1\}\{([^{}]+)\}/g, (match, inner) => `\\sqrt{${inner}}`);
       r = r.replace(/\\sqrt\{([^{}]+)\}/g, (match, inner) => `\\sqrt{${inner}}`);
-      r = r.replace(/\^\\frac\{1\}\{(\d+)\}/g, (match, n) => {
-        return '';
-      });
-      r = r.replace(/(\d+)\s*\^\s*\\frac\{1\}\{(\d+)\}/g, (match, base, n) => {
-        if (n === '2') return `\\sqrt{${base}}`;
-        return `\\sqrt[${n}]{${base}}`;
-      });
-      r = r.replace(/\\sqrt\{(\d+)\}\s*\^\s*\\frac\{1\}\{(\d+)\}/g, (match, base, n) => {
-        if (n === '2') return `\\sqrt{${base}}`;
-        return `\\sqrt[${n}]{${base}}`;
-      });
-      r = r.replace(/\^\\frac\{1\}\{(\d+)\}/g, (match, n) => {
-        if (n === '2') return '';
-        return `^{1/${n}}`;
-      });
+      r = r.replace(/\^\{?1\/2\}?/g, '');
+      r = r.replace(/\{(\d+)\}\s*\^\s*\\frac\{1\}\{\d+\}/g, (match, base) => `\\sqrt{${base}}`);
+      r = r.replace(/\\sqrt\{(\d+)\}\s*\^\s*\\frac\{1\}\{\d+\}/g, (match, base) => `\\sqrt{${base}}`);
+      r = r.replace(/(\w+)\s*\^\s*\\frac\{1\}\{\d+\}/g, (match, base) => `\\sqrt{${base}}`);
+      r = r.replace(/\^\s*\\frac\{1\}\{\d+\}/g, '');
+      r = r.replace(/(\w+)\^\{1\/2\}/g, (match, base) => `\\sqrt{${base}}`);
+      r = r.replace(/(\w+)\s*\^\s*\(1\/2\)/g, (match, base) => `\\sqrt{${base}}`);
+      r = r.replace(/\^\s*\(1\/2\)/g, '');
+      r = r.replace(/(\w+)\s*\^\s*1\/2/g, (match, base) => `\\sqrt{${base}}`);
+      r = r.replace(/(\w+)\^1\/2/g, (match, base) => `\\sqrt{${base}}`);
+      r = r.replace(/(-?\d+)\^\(1\/2\)/g, (match, base) => `\\sqrt{${base}}`);
+      r = r.replace(/\((-?\d+)\)\^\(1\/2\)/g, (match, base) => `\\sqrt{${base}}`);
+      r = r.replace(/(-?\d+)\^1\/2/g, (match, base) => `\\sqrt{${base}}`);
       return r;
     }
   }
-  return algExpr.replace(/\*/g, '').replace(/abs\(([^)]+)\)/g, '|$1|').replace(/sqrt\(([^)]+)\)/g, '\\sqrt{$1}');
+  return algExpr
+    .replace(/\*/g, '')
+    .replace(/abs\(([^)]+)\)/g, '|$1|')
+    .replace(/(\w+)\^1\/2/g, 'sqrt($1)')
+    .replace(/(\w+)\^\(1\/2\)/g, 'sqrt($1)')
+    .replace(/sqrt\(([^)]+)\)/g, '\\sqrt{$1}');
 }
 
 function buildApplyLatex(lhsAlg, rhsAlg, op, rawVal) {
@@ -276,6 +279,7 @@ function isNumberOnly(expr) {
         const varName = cmd.getVar(match);
         const diff    = `(${alg.lhs})-(${alg.rhs})`;
         const result  = runAlg(`roots(${diff},${varName})`);
+        console.log('roots result:', result);
         if (!result || result === '0') return { error: `No se pudo resolver para ${varName}.` };
         return {
           latex: `${varName}=${toLatex(result)}`,
