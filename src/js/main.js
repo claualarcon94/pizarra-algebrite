@@ -71,22 +71,318 @@ const COMMANDS = [
     regex: /^(?:ra[íi]z(?:\s+cuadrada)?|sqrt|racionaliza)$/i,
     mode: 'sqrt',
   },
+  {
+    id: 'separa',
+    label: () => 'Separa integral en sumas',
+    aliases: ['separa', 'separar'],
+    regex: /^(?:separa(?:r)?)$/i,
+    mode: 'separate',
+  },
 ];
 
 let state = {
   steps: [],
   currentAlg: null,
+  currentIntegral: null,
 };
+
+function normalizeMathFunction(expr) {
+  let result = expr;
+  
+  const replacements = [
+    [/\b(logaritmo\s+natural|log\s+natural)\b/gi, 'log'],
+    [/\blogaritmo\b/gi, 'log'],
+    [/\bln\b/gi, 'log'],
+    [/\blog\s*\(?\s*/gi, 'log('],
+    [/\bseno\b/gi, 'sin'],
+    [/\bsen\b/gi, 'sin'],
+    [/\bcoseno\b/gi, 'cos'],
+    [/\bcos\b/gi, 'cos'],
+    [/\btangente\b/gi, 'tan'],
+    [/\btan\b/gi, 'tan'],
+    [/\bcotangente\b/gi, 'cot'],
+    [/\bcot\b/gi, 'cot'],
+    [/\bsecante\b/gi, 'sec'],
+    [/\bsec\b/gi, 'sec'],
+    [/\bcosecante\b/gi, 'csc'],
+    [/\bcsc\b/gi, 'csc'],
+    [/\barcoseno\b/gi, 'acos'],
+    [/\barcseno\b/gi, 'asin'],
+    [/\barctangente\b/gi, 'atan'],
+    [/\barcsen\b/gi, 'asin'],
+    [/\barccos\b/gi, 'acos'],
+    [/\barctan\b/gi, 'atan'],
+    [/\barcsin\b/gi, 'asin'],
+    [/\barcarccos\b/gi, 'acos'],
+    [/\barcarctan\b/gi, 'atan'],
+    [/\barcarcsin\b/gi, 'asin'],
+    [/\basen\b/gi, 'asin'],
+    [/\bacos\b/gi, 'acos'],
+    [/\batan\b/gi, 'atan'],
+    [/\bra[íi]z\s+cuadrada\b/gi, 'sqrt'],
+    [/\bra[íi]z\s+de\s+2\b/gi, 'sqrt'],
+    [/\bra[íi]z\b/gi, 'sqrt'],
+    [/\braiz\s+cubica\b/gi, 'cuberoot'],
+    [/\braiz\s+de\s+3\b/gi, 'cuberoot'],
+    [/\braiz\b/gi, 'sqrt'],
+    [/\bexponencial\b/gi, 'exp'],
+    [/\bexp\s+de\b/gi, 'exp'],
+    [/\be\s+elevado\s+a\b/gi, 'exp'],
+    [/\be\^\b/gi, 'exp'],
+    [/\bvalor\s+absoluto\b/gi, 'abs'],
+    [/\babsoluto\b/gi, 'abs'],
+    [/\babs\b/gi, 'abs'],
+  ];
+  
+  for (const [pattern, replacement] of replacements) {
+    result = result.replace(pattern, replacement);
+  }
+  
+  result = result.replace(/\s*\^/g, '^');
+  
+  return result;
+}
+
+function parseIntegral(text) {
+  const t = text.toLowerCase().trim();
+  
+  const definitePattern = /^(?:integral|int|∫)\s*(?:de\s+)?(.+?)\s+a\s+(.+?)\s+de\s+(.+?)\s*dx?$/i;
+  const matchDef = t.match(definitePattern);
+  if (matchDef) {
+    const lower = matchDef[1].trim();
+    const upper = matchDef[2].trim();
+    const integrand = matchDef[3].trim();
+    return {
+      type: 'definite',
+      integrand: integrand,
+      lower: isNaN(lower) ? lower : parseFloat(lower),
+      upper: isNaN(upper) ? upper : parseFloat(upper),
+    };
+  }
+  
+  const indefinitePattern = /^(?:integral|int|∫)\s*(?:de\s+)?(.+?)\s*dx?$/i;
+  const matchIndef = t.match(indefinitePattern);
+  if (matchIndef) {
+    return {
+      type: 'indefinite',
+      integrand: matchIndef[1].trim(),
+    };
+  }
+  
+  return null;
+}
+
+function isIntegral(text) {
+  return parseIntegral(text) !== null;
+}
+
+function toIntegralLatex(integral) {
+  const algForm = toAlg(integral.integrand);
+  const integrandLatex = toLatex(algForm);
+  if (integral.type === 'definite') {
+    return `\\int_{${integral.lower}}^{${integral.upper}} ${integrandLatex}\\,dx`;
+  }
+  return `\\int ${integrandLatex}\\,dx`;
+}
+
+function processIntegralCommand(text, integral) {
+  for (const cmd of COMMANDS) {
+    const match = text.match(cmd.regex);
+    if (!match) continue;
+
+    switch (cmd.mode) {
+      case 'apply': {
+        const rawVal = normalizeUserInput(match[cmd.valueGroup].trim());
+        const valAlg = toAlg(rawVal);
+        let newIntegrand;
+        if (cmd.op === '/') {
+          newIntegrand = `(${integral.integrand})/(${valAlg})`;
+        } else if (cmd.op === '*') {
+          newIntegrand = `(${integral.integrand})*(${valAlg})`;
+        } else {
+          newIntegrand = `${integral.integrand}${cmd.op}(${valAlg})`;
+        }
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        const newLatex = cmd.op === '+' 
+          ? `\\int ${toLatex(newIntegrand)}\\,dx = \\int ${toLatex(integral.integrand)}\\,dx ${cmd.op === '+' ? '+' : ''} ${rawVal}`
+          : cmd.op === '-'
+          ? `\\int ${toLatex(newIntegrand)}\\,dx = \\int ${toLatex(integral.integrand)}\\,dx - ${rawVal}`
+          : cmd.op === '*'
+          ? `\\int ${toLatex(newIntegrand)}\\,dx = ${rawVal}\\left(\\int ${toLatex(integral.integrand)}\\,dx\\right)`
+          : `\\int ${toLatex(newIntegrand)}\\,dx = \\dfrac{\\int ${toLatex(integral.integrand)}\\,dx}{${rawVal}}`;
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(rawVal),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'simplify': {
+        const algForm = toAlg(integral.integrand);
+        const newIntegrand = runAlg(`simplify(${algForm})`);
+        if (!newIntegrand) return { error: 'No se pudo simplificar.' };
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'expand': {
+        const algForm = toAlg(integral.integrand);
+        const newIntegrand = runAlg(`expand(${algForm})`);
+        if (!newIntegrand) return { error: 'No se pudo expandir.' };
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'factor': {
+        const algForm = toAlg(integral.integrand);
+        const newIntegrand = runAlg(`factor(${algForm})`);
+        if (!newIntegrand) return { error: 'No se pudo factorizar.' };
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'solve': {
+        const algForm = toAlg(integral.integrand);
+        const varName = cmd.getVar ? cmd.getVar(match) : 'x';
+        const result = runAlg(`integrate(${algForm},${varName})`);
+        if (!result || result.includes('Error')) return { error: 'No se pudo integrar.' };
+        const resultLatex = toLatex(result);
+        let finalLatex;
+        if (integral.type === 'definite') {
+          const lowerVal = runAlg(`${result}|${varName}=${integral.upper}`);
+          const upperVal = runAlg(`${result}|${varName}=${integral.lower}`);
+          const evaluated = runAlg(`(${lowerVal})-(${upperVal})`);
+          finalLatex = toLatex(evaluated);
+        } else {
+          finalLatex = `${resultLatex}+C`;
+        }
+        return {
+          latex: finalLatex,
+          annotation: 'Integral resuelta',
+          newIntegral: null,
+          done: true,
+        };
+      }
+
+      case 'power': {
+        const exp = cmd.getVal ? cmd.getVal(match) : '2';
+        const newIntegrand = `(${integral.integrand})^(${exp})`;
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(exp),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'sqrt': {
+        const newIntegrand = `sqrt(${integral.integrand})`;
+        const newIntegral = { ...integral, integrand: newIntegrand };
+        return {
+          latex: toIntegralLatex(newIntegral),
+          annotation: cmd.label(),
+          newIntegral: newIntegral,
+          done: false,
+        };
+      }
+
+      case 'separate': {
+        const terms = [];
+        let current = '';
+        let parenDepth = 0;
+        
+        for (const char of integral.integrand) {
+          if (char === '(') parenDepth++;
+          else if (char === ')') parenDepth--;
+          else if (char === '+' && parenDepth === 0) {
+            if (current.trim()) terms.push(current.trim());
+            current = '';
+            continue;
+          }
+          current += char;
+        }
+        if (current.trim()) terms.push(current.trim());
+        
+        if (terms.length <= 1) {
+          return { error: 'No hay términos separados para descomponer.' };
+        }
+        
+        const separatedLatex = terms.map(term => {
+          const newInt = { ...integral, integrand: term };
+          return toIntegralLatex(newInt);
+        }).join(' + ');
+        
+        return {
+          latex: separatedLatex,
+          annotation: 'Separa integral en sumas',
+          newIntegral: null,
+          done: false,
+        };
+      }
+    }
+  }
+
+  return { error: `No reconocí "${text}". Prueba: simplifica, suma X, resta X, etc.` };
+}
 
 function isNewEquation(text) {
   return text.includes('=');
 }
 
 function toAlg(str) {
-  return str.trim()
-    .replace(/\s+/g, '')
-    .replace(/(\d)([a-zA-Z])/g, '$1*$2')
-    .replace(/(\d)(\!)/g, '$1$2');
+  let result = str.trim();
+  
+  const functions = [
+    [/\b(logaritmo\s+natural|logaritmo|ln)\s+de\s+(.+)/gi, 'log($2)'],
+    [/\blog\s+de\s+(.+)/gi, 'log($1)'],
+    [/\b(log)\s*\(\s*(.+?)\s*\)/gi, 'log($2)'],
+    [/\bseno\s+de\s+(.+)/gi, 'sin($1)'],
+    [/\bsen\s+de\s+(.+)/gi, 'sin($1)'],
+    [/\bsin\s+de\s+(.+)/gi, 'sin($1)'],
+    [/\bcoseno\s+de\s+(.+)/gi, 'cos($1)'],
+    [/\bcos\s+de\s+(.+)/gi, 'cos($1)'],
+    [/\btangente\s+de\s+(.+)/gi, 'tan($1)'],
+    [/\btan\s+de\s+(.+)/gi, 'tan($1)'],
+    [/\barcoseno\s+de\s+(.+)/gi, 'asin($1)'],
+    [/\barcsen\s+de\s+(.+)/gi, 'asin($1)'],
+    [/\barcsin\s+de\s+(.+)/gi, 'asin($1)'],
+    [/\barcocoseno\s+de\s+(.+)/gi, 'acos($1)'],
+    [/\barccos\s+de\s+(.+)/gi, 'acos($1)'],
+    [/\barctangente\s+de\s+(.+)/gi, 'atan($1)'],
+    [/\barctan\s+de\s+(.+)/gi, 'atan($1)'],
+    [/\bra[íi]z\s+de\s+(.+)/gi, 'sqrt($1)'],
+    [/\braiz\s+de\s+(.+)/gi, 'sqrt($1)'],
+    [/\bexponencial\s+de\s+(.+)/gi, 'exp($1)'],
+    [/\bexp\s+de\s+(.+)/gi, 'exp($1)'],
+    [/\be\^/gi, 'exp'],
+  ];
+  
+  for (const [regex, replacement] of functions) {
+    result = result.replace(regex, replacement);
+  }
+  
+  result = result.replace(/\s+/g, '');
+  result = result.replace(/(\d)([a-zA-Z])/g, '$1*$2');
+  result = result.replace(/(\d)(\!)/g, '$1$2');
+  
+  return result;
 }
 
 function normalizeUserInput(str) {
@@ -164,22 +460,42 @@ function processInstruction(text) {
   if (isNewEquation(text)) {
     const parts = text.split('=');
     if (parts.length !== 2) return { error: 'Formato inválido. Ejemplo: 2x+5=10' };
-    const lhsAlg = toAlg(parts[0]);
-    const rhsAlg = toAlg(parts[1]);
+    const lhsNorm = normalizeMathFunction(parts[0]);
+    const rhsNorm = normalizeMathFunction(parts[1]);
+    const lhsAlg = toAlg(lhsNorm);
+    const rhsAlg = toAlg(rhsNorm);
     return {
       latex: buildEqLatex(lhsAlg, rhsAlg),
-      annotation: 'Ecuación inicial',
+      annotation: 'Ecuación',
       newAlg: { lhs: lhsAlg, rhs: rhsAlg },
       isNew: true,
       done: false,
     };
   }
 
-  if (!state.currentAlg) {
-    return { error: 'Primero escribe una ecuación, por ejemplo: 2x+5=10' };
+  const integral = parseIntegral(text);
+  if (integral) {
+    return {
+      latex: toIntegralLatex(integral),
+      annotation: integral.type === 'definite' ? 'Integral definida' : 'Integral indefinida',
+      newIntegral: integral,
+      isNew: true,
+      done: false,
+    };
   }
 
-  const alg = state.currentAlg;
+  if (state.currentAlg) {
+    return processEquationCommand(text, state.currentAlg);
+  }
+
+  if (state.currentIntegral) {
+    return processIntegralCommand(text, state.currentIntegral);
+  }
+
+  return { error: 'Escribe una ecuación (ej: 2x+5=10) o integral (ej: integral de x^2 dx)' };
+}
+
+function processEquationCommand(text, alg) {
 
   for (const cmd of COMMANDS) {
     const match = text.match(cmd.regex);
@@ -367,6 +683,7 @@ function showBoardError(msg) {
 function clearBoard() {
   state.steps = [];
   state.currentAlg = null;
+  state.currentIntegral = null;
   document.getElementById('steps').innerHTML = '';
   document.getElementById('emptyState').style.display = 'flex';
 }
@@ -384,9 +701,16 @@ function handleSend() {
     return;
   }
 
-  if (result.isNew && state.steps.length > 0) clearBoard();
 
-  state.currentAlg = result.newAlg;
+
+  if (result.newIntegral) {
+    state.currentIntegral = result.newIntegral;
+    state.currentAlg = null;
+  } else if (result.newAlg) {
+    state.currentAlg = result.newAlg;
+    state.currentIntegral = null;
+  }
+
   const step = { latex: result.latex, annotation: result.annotation, done: !!result.done };
   state.steps.push(step);
   addStepToDOM(step);
@@ -402,7 +726,7 @@ document.getElementById('userInput').addEventListener('keydown', e => {
 });
 
 function buildUI() {
-  const suggestions = ['resta 5', 'suma 3', 'divide entre 2', 'multiplica por 3', 'simplifica', 'expande', 'factoriza', 'resuelve'];
+  const suggestions = ['integral de seno de x dx', 'integral de logaritmo de x dx', 'integral de exponencial de x dx', 'seno de x = 0', 'simplifica', 'resuelve'];
   const sugRow = document.getElementById('suggestionsRow');
   suggestions.forEach(s => {
     const chip = document.createElement('span');
