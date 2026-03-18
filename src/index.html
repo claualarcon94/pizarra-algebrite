@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pizarra de Ecuaciones</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <link rel="stylesheet" href="css/style.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script src="js/algebrite.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Special+Elite&family=Raleway:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="room">
+
+  <div class="header">
+    <span class="header-icon">🖊️</span>
+    <div>
+      <h1>Pizarra de Ecuaciones</h1>
+      <div class="header-sub">Parser simbólico · Algebrite CAS</div>
+    </div>
+    <button class="btn btn-clear" style="margin-left:auto" onclick="clearBoard()">✕ Borrar</button>
+  </div>
+
+  <div class="board-frame">
+    <div class="board" id="board">
+      <div class="board-lines"></div>
+      <div id="emptyState" class="empty-state">
+        <div class="icon">∑</div>
+        <p>Escribe una ecuación para comenzar<br>luego da instrucciones paso a paso</p>
+      </div>
+      <div class="steps-container" id="steps"></div>
+    </div>
+    <div class="chalk-tray">
+      <div class="chalk-piece" style="width:40px;background:#f0ede0"></div>
+      <div class="chalk-piece" style="width:28px;background:#e8c96e"></div>
+      <div class="chalk-piece" style="width:20px;background:#7ec8a0"></div>
+      <div class="chalk-piece" style="width:35px;background:#f0ede0;opacity:0.4"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="input-row">
+      <div class="input-wrap">
+        <input type="text" id="userInput"
+          placeholder="Ej: 3x+7=22  · o ·  resta 7  · o ·  divide entre 3"
+          autocomplete="off" spellcheck="false"/>
+      </div>
+      <button class="btn" onclick="handleSend()">➜ Enviar</button>
+    </div>
+
+    <div class="suggestions" id="suggestionsRow"></div>
+
+    <div class="commands-panel">
+      <div class="commands-title">Comandos disponibles</div>
+      <div class="commands-grid" id="commandsGrid"></div>
+    </div>
+
+    <div class="mode-label">Motor: <span>Algebrite CAS + KaTeX</span></div>
+  </div>
+
+</div>
+
+<script src="js/main.js"></script>
+</body>
+</html>
