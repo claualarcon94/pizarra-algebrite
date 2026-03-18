@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pizarra de Ecuaciones</title>
+<link rel="stylesheet" href="katex.min.css">
+<script src="katex.min.js"></script>
+<script src="algebrite.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Special+Elite&family=Raleway:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --board: #1a2e1a;
+    --board-dark: #111d11;
+    --chalk: #f0ede0;
+    --chalk-dim: #b8b49a;
+    --chalk-faint: #6b6854;
+    --accent: #e8c96e;
+    --accent2: #7ec8a0;
+    --red-chalk: #e87070;
+    --border: #2d4a2d;
+    --groove: #0d1a0d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0e1a0e;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: 'Raleway', sans-serif;
+    color: var(--chalk);
+    padding: 20px;
+  }
+  .room { width: 100%; max-width: 820px; display: flex; flex-direction: column; gap: 16px; }
+  .header { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+  .header-icon { font-size: 28px; }
+  .header h1 { font-family: 'Special Elite', cursive; font-size: 1.5rem; color: var(--chalk); letter-spacing: 1px; }
+  .header-sub { font-size: 0.72rem; color: var(--chalk-faint); letter-spacing: 2px; text-transform: uppercase; margin-top: 2px; }
+  .board-frame {
+    background: var(--groove);
+    border-radius: 6px;
+    padding: 10px;
+    box-shadow: 0 0 0 3px #3a5a3a, 0 0 0 6px #1e2e1e, 0 8px 32px rgba(0,0,0,0.7), inset 0 0 40px rgba(0,0,0,0.4);
+    position: relative;
+  }
+  .chalk-tray {
+    height: 8px;
+    background: linear-gradient(to bottom, #2a1a0a, #3d2a14, #2a1a0a);
+    border-radius: 0 0 4px 4px;
+    margin: 0 -10px -10px;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+    display: flex; align-items: center; padding: 0 20px; gap: 10px;
+  }
+  .chalk-piece { height: 4px; border-radius: 2px; opacity: 0.7; }
+  .board {
+    background: radial-gradient(ellipse at 20% 20%, #1f3a1f 0%, transparent 50%), radial-gradient(ellipse at 80% 80%, #162a16 0%, transparent 50%), var(--board);
+    border-radius: 3px;
+    min-height: 420px;
+    max-height: 520px;
+    overflow-y: auto;
+    padding: 28px 32px;
+    position: relative;
+  }
+  .board::before {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none; opacity: 0.5;
+  }
+  .board-lines {
+    position: absolute; inset: 0;
+    background-image: repeating-linear-gradient(to bottom, transparent, transparent 71px, rgba(255,255,255,0.025) 71px, rgba(255,255,255,0.025) 72px);
+    pointer-events: none;
+  }
+  .steps-container { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 0; }
+  .step {
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: center; gap: 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    animation: chalkAppear 0.45s ease forwards;
+    opacity: 0;
+  }
+  @keyframes chalkAppear {
+    0%  { opacity: 0; transform: translateX(-6px); filter: blur(2px); }
+    100%{ opacity: 1; transform: translateX(0);    filter: blur(0);   }
+  }
+  .step-eq { font-family: 'Caveat', cursive; font-size: 1.85rem; font-weight: 600; color: var(--chalk); line-height: 1.3; text-shadow: 0 0 12px rgba(240,237,224,0.12); }
+  .step-annotation { font-family: 'Special Elite', cursive; font-size: 0.72rem; color: var(--accent); letter-spacing: 0.5px; white-space: nowrap; text-align: right; opacity: 0.85; }
+  .step.initial .step-annotation { color: var(--accent2); }
+  .step.solved .step-eq { color: var(--accent2) !important; text-shadow: 0 0 20px rgba(126,200,160,0.3); }
+  .solved-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: rgba(126,200,160,0.12); border: 1px solid rgba(126,200,160,0.3);
+    border-radius: 20px; padding: 4px 12px;
+    font-size: 0.7rem; color: var(--accent2); letter-spacing: 1px;
+    font-family: 'Raleway', sans-serif; font-weight: 600; text-transform: uppercase;
+    animation: chalkAppear 0.6s ease forwards;
+    margin-top: 8px; align-self: flex-start;
+  }
+  .empty-state {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; color: var(--chalk-faint); pointer-events: none;
+  }
+  .empty-state .icon { font-size: 3rem; opacity: 0.3; }
+  .empty-state p { font-family: 'Special Elite', cursive; font-size: 0.9rem; letter-spacing: 1px; opacity: 0.5; text-align: center; }
+  .board-error { font-family: 'Special Elite', cursive; font-size: 0.8rem; color: var(--red-chalk); padding: 8px 0; opacity: 0.8; }
+  .controls { display: flex; flex-direction: column; gap: 10px; }
+  .input-row { display: flex; gap: 8px; }
+  .input-wrap { flex: 1; position: relative; }
+  .input-wrap input {
+    width: 100%; background: rgba(30,50,30,0.8); border: 1px solid var(--border);
+    border-radius: 6px; padding: 12px 16px; color: var(--chalk);
+    font-family: 'Caveat', cursive; font-size: 1.1rem; outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .input-wrap input::placeholder { color: var(--chalk-faint); font-size: 0.95rem; }
+  .input-wrap input:focus { border-color: #4a7a4a; box-shadow: 0 0 0 3px rgba(74,122,74,0.15); }
+  .btn {
+    background: linear-gradient(135deg, #2d5a2d, #1e3e1e); border: 1px solid #3a6a3a;
+    border-radius: 6px; color: var(--chalk); font-family: 'Special Elite', cursive;
+    font-size: 0.85rem; letter-spacing: 1px; padding: 12px 20px; cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .btn:hover { background: linear-gradient(135deg, #3a6e3a, #2a4e2a); border-color: #4a8a4a; box-shadow: 0 2px 12px rgba(60,120,60,0.3); }
+  .btn:active { transform: translateY(1px); }
+  .btn-clear { background: linear-gradient(135deg, #3a2020, #241414); border-color: #5a3030; font-size: 0.75rem; padding: 8px 14px; }
+  .btn-clear:hover { background: linear-gradient(135deg, #4a2828, #301818); border-color: #6a3838; box-shadow: 0 2px 12px rgba(120,60,60,0.3); }
+  .suggestions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .suggestion-chip {
+    background: rgba(26,46,26,0.6); border: 1px solid #2d4a2d; border-radius: 20px;
+    padding: 5px 12px; font-size: 0.72rem; color: var(--chalk-dim); cursor: pointer;
+    transition: all 0.15s; font-family: 'Raleway', sans-serif; letter-spacing: 0.3px;
+  }
+  .suggestion-chip:hover { background: rgba(40,70,40,0.7); border-color: #4a6a4a; color: var(--chalk); }
+  .mode-label { font-size: 0.65rem; color: var(--chalk-faint); letter-spacing: 2px; text-transform: uppercase; text-align: right; padding: 0 2px; }
+  .mode-label span { color: var(--accent2); }
+  /* Comandos panel */
+  .commands-panel {
+    background: rgba(10,20,10,0.6); border: 1px solid #1e3a1e; border-radius: 6px;
+    padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .commands-title { font-family: 'Special Elite', cursive; font-size: 0.7rem; color: var(--chalk-faint); letter-spacing: 2px; text-transform: uppercase; }
+  .commands-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px; }
+  .cmd-row { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; }
+  .cmd-key { font-family: 'Special Elite', cursive; font-size: 0.75rem; color: var(--accent); min-width: 80px; }
+  .cmd-desc { font-size: 0.68rem; color: var(--chalk-faint); }
+  .board::-webkit-scrollbar { width: 4px; }
+  .board::-webkit-scrollbar-track { background: transparent; }
+  .board::-webkit-scrollbar-thumb { background: #2d4a2d; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="room">
+
+  <div class="header">
+    <span class="header-icon">🖊️</span>
+    <div>
+      <h1>Pizarra de Ecuaciones</h1>
+      <div class="header-sub">Parser simbólico · Algebrite CAS</div>
+    </div>
+    <button class="btn btn-clear" style="margin-left:auto" onclick="clearBoard()">✕ Borrar</button>
+  </div>
+
+  <div class="board-frame">
+    <div class="board" id="board">
+      <div class="board-lines"></div>
+      <div id="emptyState" class="empty-state">
+        <div class="icon">∑</div>
+        <p>Escribe una ecuación para comenzar<br>luego da instrucciones paso a paso</p>
+      </div>
+      <div class="steps-container" id="steps"></div>
+    </div>
+    <div class="chalk-tray">
+      <div class="chalk-piece" style="width:40px;background:#f0ede0"></div>
+      <div class="chalk-piece" style="width:28px;background:#e8c96e"></div>
+      <div class="chalk-piece" style="width:20px;background:#7ec8a0"></div>
+      <div class="chalk-piece" style="width:35px;background:#f0ede0;opacity:0.4"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="input-row">
+      <div class="input-wrap">
+        <input type="text" id="userInput"
+          placeholder="Ej: 3x+7=22  · o ·  resta 7  · o ·  divide entre 3"
+          autocomplete="off" spellcheck="false"/>
+      </div>
+      <button class="btn" onclick="handleSend()">➜ Enviar</button>
+    </div>
+
+    <div class="suggestions" id="suggestionsRow"></div>
+
+    <div class="commands-panel">
+      <div class="commands-title">Comandos disponibles</div>
+      <div class="commands-grid" id="commandsGrid"></div>
+    </div>
+
+    <div class="mode-label">Motor: <span>Algebrite CAS + KaTeX</span></div>
+  </div>
+
+</div>
+
+<script>
+// ================================================================
+//  LIBRERÍA DE COMANDOS
+//  Agrega objetos a este array para enseñarle nuevas instrucciones.
+//
+//  Cada comando tiene:
+//    id        → nombre interno
+//    label     → texto para mostrar en el panel y en la anotación
+//    aliases   → lista de palabras clave (para el panel de ayuda)
+//    regex     → expresión regular que detecta el comando en el texto
+//    mode      → 'apply' | 'simplify' | 'expand' | 'factor' | 'solve' | 'power' | 'sqrt'
+//
+//  Para modo 'apply':
+//    op        → operador: '+' | '-' | '*' | '/'
+//    valueGroup→ índice del grupo del regex que contiene el valor numérico
+//
+//  Para modo 'solve':
+//    getVar    → función (match) → nombre de la variable
+//
+//  Para modo 'power':
+//    getVal    → función (match) → exponente como string
+// ================================================================
+const COMMANDS = [
+  {
+    id: 'resta',
+    label: v => `Resta ${v} a ambos lados`,
+    aliases: ['resta X', 'restar X', 'quita X'],
+    regex: /^(?:resta|restar|sustrae?|sustraer|quita|quitar)\s+(.+?)(?:\s+(?:a|de|en)?\s*ambos\s+lados)?$/i,
+    mode: 'apply', op: '-', valueGroup: 1,
+  },
+  {
+    id: 'suma',
+    label: v => `Suma ${v} a ambos lados`,
+    aliases: ['suma X', 'sumar X', 'añade X'],
+    regex: /^(?:suma|sumar|a[ñn]ade?|a[ñn]adir|agrega|agregar)\s+(.+?)(?:\s+(?:a\s+)?ambos\s+lados)?$/i,
+    mode: 'apply', op: '+', valueGroup: 1,
+  },
+  {
+    id: 'divide',
+    label: v => `Divide ambos lados entre ${v}`,
+    aliases: ['divide entre X', 'divide por X'],
+    regex: /^(?:divide|dividir|div(?:idir)?)\s+(?:entre|por|\/)\s+(.+?)(?:\s+(?:en\s+)?ambos\s+lados)?$/i,
+    mode: 'apply', op: '/', valueGroup: 1,
+  },
+  {
+    id: 'multiplica',
+    label: v => `Multiplica ambos lados por ${v}`,
+    aliases: ['multiplica por X', 'multiplicar por X'],
+    regex: /^(?:multiplica|multiplicar|mult)\s+(?:por|x|\*)\s+(.+?)(?:\s+(?:en\s+)?ambos\s+lados)?$/i,
+    mode: 'apply', op: '*', valueGroup: 1,
+  },
+  {
+    id: 'simplifica',
+    label: () => 'Simplifica',
+    aliases: ['simplifica', 'cancela', 'reduce'],
+    regex: /^(?:simplifica|simplificar|simplify|reduce|reducir|cancela|cancelar|simplif)$/i,
+    mode: 'simplify',
+  },
+  {
+    id: 'expande',
+    label: () => 'Expande',
+    aliases: ['expande', 'desarrolla'],
+    regex: /^(?:expande|expandir|expand|desarrolla|desarrollar)$/i,
+    mode: 'expand',
+  },
+  {
+    id: 'factoriza',
+    label: () => 'Factoriza',
+    aliases: ['factoriza', 'factor'],
+    regex: /^(?:factori[zs]a|factori[zs]ar|factor)$/i,
+    mode: 'factor',
+  },
+  {
+    id: 'resuelve',
+    label: v => `Resuelve para ${v}`,
+    aliases: ['resuelve', 'resuelve x', 'despeja'],
+    regex: /^(?:resuelve|resolver|solve|despeja|despejar)(?:\s+([a-zA-Z]))?$/i,
+    mode: 'solve',
+    getVar: m => (m[1] || 'x').trim(),
+  },
+  {
+    id: 'eleva',
+    label: v => `Eleva al ${v === '2' ? 'cuadrado' : v}`,
+    aliases: ['eleva al cuadrado', 'eleva a la N'],
+    regex: /^(?:eleva|elevar)(?:\s+(?:ambos\s+lados\s+)?(?:al?\s+cuadrado|a\s+la\s+(.+)))?$|^(?:al\s+)?cuadrado$/i,
+    mode: 'power',
+    getVal: m => (m[1] || '2').trim(),
+  },
+  {
+    id: 'raiz',
+    label: () => 'Raíz cuadrada a ambos lados',
+    aliases: ['raíz', 'raíz cuadrada', 'sqrt'],
+    regex: /^(?:ra[íi]z(?:\s+cuadrada)?|sqrt|racionaliza)$/i,
+    mode: 'sqrt',
+  },
+];
+
+// ================================================================
+//  ESTADO
+// ================================================================
+let state = {
+  steps: [],
+  currentAlg: null, // { lhs: "2*x+5", rhs: "10" }
+};
+
+// ================================================================
+//  UTILIDADES DE CONVERSIÓN
+// ================================================================
+
+// ¿El texto contiene un '=' ? → es una ecuación nueva
+function isNewEquation(text) {
+  return text.includes('=');
+}
+
+// Convierte "2x+5" a "2*x+5" para Algebrite
+function toAlg(str) {
+  return str.trim()
+    .replace(/\s+/g, '')
+    .replace(/(\d)([a-zA-Z])/g, '$1*$2');
+}
+
+// Limpia forma algebraica para pasarla a KaTeX como intermedia
+// "2*x+5" → "2x+5"  (KaTeX no necesita el asterisco)
+function algToDisplay(str) {
+  return str
+    .replace(/(\d)\*([a-zA-Z])/g, '$1$2')   // 2*x → 2x
+    .replace(/\*([a-zA-Z])/g, '$1');          // *x  → x
+}
+
+// Llama a Algebrite de forma segura
+function runAlg(expr) {
+  try { return Algebrite.run(expr).trim(); }
+  catch(e) { console.error('Algebrite:', e); return null; }
+}
+
+// Convierte un resultado de Algebrite a LaTeX para KaTeX
+function toLatex(algExpr) {
+  const r = runAlg(`latex(${algExpr})`);
+  if (r) return r.replace(/^"|"$/g, '');
+  return algToDisplay(algExpr);
+}
+
+// Construye el LaTeX para el paso intermedio (con la operación visible, sin simplificar)
+function buildApplyLatex(lhsAlg, rhsAlg, op, rawVal) {
+  const lhs = algToDisplay(lhsAlg);
+  const rhs = algToDisplay(rhsAlg);
+  const v   = rawVal.trim();
+  if (op === '+') return `${lhs}+${v}=${rhs}+${v}`;
+  if (op === '-') return `${lhs}-${v}=${rhs}-${v}`;
+  if (op === '*') return `\\left(${lhs}\\right)\\cdot ${v}=\\left(${rhs}\\right)\\cdot ${v}`;
+  if (op === '/') return `\\dfrac{${lhs}}{${v}}=\\dfrac{${rhs}}{${v}}`;
+  return `${lhs}=${rhs}`;
+}
+
+// Construye LaTeX de ecuación desde forma algebraica (usando Algebrite para fracciones, etc.)
+function buildEqLatex(lhsAlg, rhsAlg) {
+  return `${toLatex(lhsAlg)}=${toLatex(rhsAlg)}`;
+}
+
+// Comprueba si ya está resuelta: un lado es solo una variable y el otro sin variables
+function isSolved(lhsAlg, rhsAlg) {
+  const l = (runAlg(`simplify(${lhsAlg})`) || '').trim();
+  const r = (runAlg(`simplify(${rhsAlg})`) || '').trim();
+  return /^[a-zA-Z]$/.test(l) && !/[a-zA-Z]/.test(r);
+}
+
+// ================================================================
+//  PROCESADOR PRINCIPAL
+// ================================================================
+function processInstruction(text) {
+  text = text.trim();
+
+  // --- Ecuación nueva ---
+  if (isNewEquation(text)) {
+    const parts = text.split('=');
+    if (parts.length !== 2) return { error: 'Formato inválido. Ejemplo: 2x+5=10' };
+    const lhsAlg = toAlg(parts[0]);
+    const rhsAlg = toAlg(parts[1]);
+    return {
+      latex: `${algToDisplay(lhsAlg)}=${algToDisplay(rhsAlg)}`,
+      annotation: 'Ecuación inicial',
+      newAlg: { lhs: lhsAlg, rhs: rhsAlg },
+      isNew: true,
+      done: false,
+    };
+  }
+
+  // --- Necesita ecuación previa ---
+  if (!state.currentAlg) {
+    return { error: 'Primero escribe una ecuación, por ejemplo: 2x+5=10' };
+  }
+
+  const alg = state.currentAlg;
+
+  // --- Buscar comando ---
+  for (const cmd of COMMANDS) {
+    const match = text.match(cmd.regex);
+    if (!match) continue;
+
+    switch (cmd.mode) {
+
+      case 'apply': {
+        const rawVal = match[cmd.valueGroup].trim();
+        const valAlg = toAlg(rawVal);
+        let newLhs, newRhs;
+        if (cmd.op === '/') {
+          newLhs = `(${alg.lhs})/(${valAlg})`;
+          newRhs = `(${alg.rhs})/(${valAlg})`;
+        } else if (cmd.op === '*') {
+          newLhs = `(${alg.lhs})*(${valAlg})`;
+          newRhs = `(${alg.rhs})*(${valAlg})`;
+        } else {
+          newLhs = `${alg.lhs}${cmd.op}(${valAlg})`;
+          newRhs = `${alg.rhs}${cmd.op}(${valAlg})`;
+        }
+        return {
+          latex: buildApplyLatex(alg.lhs, alg.rhs, cmd.op, rawVal),
+          annotation: cmd.label(rawVal),
+          newAlg: { lhs: newLhs, rhs: newRhs },
+          done: false,
+        };
+      }
+
+      case 'simplify': {
+        const newLhs = runAlg(`simplify(${alg.lhs})`);
+        const newRhs = runAlg(`simplify(${alg.rhs})`);
+        if (!newLhs || !newRhs) return { error: 'No se pudo simplificar.' };
+        const done = isSolved(newLhs, newRhs);
+        return {
+          latex: buildEqLatex(newLhs, newRhs),
+          annotation: cmd.label(),
+          newAlg: { lhs: newLhs, rhs: newRhs },
+          done,
+        };
+      }
+
+      case 'expand': {
+        const newLhs = runAlg(`expand(${alg.lhs})`);
+        const newRhs = runAlg(`expand(${alg.rhs})`);
+        if (!newLhs || !newRhs) return { error: 'No se pudo expandir.' };
+        return {
+          latex: buildEqLatex(newLhs, newRhs),
+          annotation: cmd.label(),
+          newAlg: { lhs: newLhs, rhs: newRhs },
+          done: false,
+        };
+      }
+
+      case 'factor': {
+        const newLhs = runAlg(`factor(${alg.lhs})`);
+        const newRhs = runAlg(`factor(${alg.rhs})`);
+        if (!newLhs || !newRhs) return { error: 'No se pudo factorizar.' };
+        return {
+          latex: buildEqLatex(newLhs, newRhs),
+          annotation: cmd.label(),
+          newAlg: { lhs: newLhs, rhs: newRhs },
+          done: false,
+        };
+      }
+
+      case 'solve': {
+        const varName = cmd.getVar(match);
+        const diff    = `(${alg.lhs})-(${alg.rhs})`;
+        const result  = runAlg(`roots(${diff},${varName})`);
+        if (!result || result === '0') return { error: `No se pudo resolver para ${varName}.` };
+        const latex   = toLatex(result);
+        return {
+          latex: `${varName}=${latex}`,
+          annotation: cmd.label(varName),
+          newAlg: { lhs: varName, rhs: result },
+          done: true,
+        };
+      }
+
+      case 'power': {
+        const exp    = cmd.getVal(match);
+        const expAlg = toAlg(exp);
+        return {
+          latex: `\\left(${algToDisplay(alg.lhs)}\\right)^{${exp}}=\\left(${algToDisplay(alg.rhs)}\\right)^{${exp}}`,
+          annotation: cmd.label(exp),
+          newAlg: { lhs: `(${alg.lhs})^(${expAlg})`, rhs: `(${alg.rhs})^(${expAlg})` },
+          done: false,
+        };
+      }
+
+      case 'sqrt': {
+        return {
+          latex: `\\sqrt{${algToDisplay(alg.lhs)}}=\\sqrt{${algToDisplay(alg.rhs)}}`,
+          annotation: cmd.label(),
+          newAlg: { lhs: `sqrt(${alg.lhs})`, rhs: `sqrt(${alg.rhs})` },
+          done: false,
+        };
+      }
+    }
+  }
+
+  // No se encontró ningún comando
+  return {
+    error: `No reconocí "${text}". Comandos: ${COMMANDS.map(c => c.id).join(', ')}`,
+  };
+}
+
+// ================================================================
+//  INTERFAZ
+// ================================================================
+function renderKatex(latex) {
+  try {
+    return katex.renderToString(latex, { throwOnError: false, displayMode: false });
+  } catch(e) {
+    return `<span style="color:var(--chalk-dim)">${latex}</span>`;
+  }
+}
+
+function addStepToDOM(step) {
+  const container = document.getElementById('steps');
+  const isFirst   = state.steps.length === 1;
+  const div       = document.createElement('div');
+  div.className   = `step${step.done ? ' solved' : ''}${isFirst ? ' initial' : ''}`;
+
+  const eqDiv = document.createElement('div');
+  eqDiv.className = 'step-eq';
+  eqDiv.innerHTML = renderKatex(step.latex);
+
+  const annDiv = document.createElement('div');
+  annDiv.className = 'step-annotation';
+  annDiv.textContent = step.annotation;
+
+  div.appendChild(eqDiv);
+  div.appendChild(annDiv);
+  container.appendChild(div);
+
+  if (step.done) {
+    const badge = document.createElement('div');
+    badge.className = 'solved-badge';
+    badge.innerHTML = '✓ &nbsp;Ecuación resuelta';
+    container.appendChild(badge);
+  }
+
+  document.getElementById('emptyState').style.display = 'none';
+  const board = document.getElementById('board');
+  setTimeout(() => board.scrollTop = board.scrollHeight, 80);
+}
+
+function showBoardError(msg) {
+  const container = document.getElementById('steps');
+  const div = document.createElement('div');
+  div.className = 'board-error';
+  div.textContent = '⚠ ' + msg;
+  container.appendChild(div);
+  document.getElementById('board').scrollTop = 99999;
+  setTimeout(() => div.remove(), 5000);
+}
+
+function clearBoard() {
+  state.steps = [];
+  state.currentAlg = null;
+  document.getElementById('steps').innerHTML = '';
+  document.getElementById('emptyState').style.display = 'flex';
+}
+
+function handleSend() {
+  const input = document.getElementById('userInput');
+  const text  = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  const result = processInstruction(text);
+
+  if (result.error) {
+    showBoardError(result.error);
+    return;
+  }
+
+  if (result.isNew && state.steps.length > 0) clearBoard();
+
+  state.currentAlg = result.newAlg;
+  const step = { latex: result.latex, annotation: result.annotation, done: !!result.done };
+  state.steps.push(step);
+  addStepToDOM(step);
+}
+
+function useSuggestion(text) {
+  document.getElementById('userInput').value = text;
+  document.getElementById('userInput').focus();
+}
+
+document.getElementById('userInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') handleSend();
+});
+
+// ================================================================
+//  GENERAR SUGERENCIAS Y PANEL DE COMANDOS DINÁMICAMENTE
+// ================================================================
+function buildUI() {
+  // Sugerencias rápidas (chips)
+  const suggestions = ['resta 5', 'suma 3', 'divide entre 2', 'multiplica por 3', 'simplifica', 'expande', 'factoriza', 'resuelve'];
+  const sugRow = document.getElementById('suggestionsRow');
+  suggestions.forEach(s => {
+    const chip = document.createElement('span');
+    chip.className = 'suggestion-chip';
+    chip.textContent = s;
+    chip.onclick = () => useSuggestion(s);
+    sugRow.appendChild(chip);
+  });
+
+  // Panel de comandos (generado desde COMMANDS)
+  const grid = document.getElementById('commandsGrid');
+  COMMANDS.forEach(cmd => {
+    const row = document.createElement('div');
+    row.className = 'cmd-row';
+    row.innerHTML = `<span class="cmd-key">${cmd.id}</span><span class="cmd-desc">${cmd.aliases.join(' · ')}</span>`;
+    grid.appendChild(row);
+  });
+}
+
+buildUI();
+</script>
+</body>
+</html>
