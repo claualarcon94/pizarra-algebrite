@@ -190,13 +190,30 @@ function processInstruction(text) {
       }
 
       case 'expand': {
-        const newLhs = runAlg(`expand(${alg.lhs})`);
-        const newRhs = runAlg(`expand(${alg.rhs})`);
+        let newLhs = runAlg(`expand(${alg.lhs})`);
+        let newRhs = runAlg(`expand(${alg.rhs})`);
+        let latexLhs = newLhs;
+        let latexRhs = newRhs;
+        
+        function expandFactorial(expr) {
+          return expr.replace(/(\d+)!/g, (match, num) => {
+            const n = parseInt(num);
+            return Array.from({length: n}, (_, i) => n - i).join('\\cdot ');
+          });
+        }
+        
+        if (alg.lhs.includes('!')) {
+          latexLhs = expandFactorial(alg.lhs);
+        }
+        if (alg.rhs.includes('!')) {
+          latexRhs = expandFactorial(alg.rhs);
+        }
         if (!newLhs || !newRhs) return { error: 'No se pudo expandir.' };
+        const latex = `${latexLhs}=${latexRhs}`;
         return {
-          latex: buildEqLatex(newLhs, newRhs),
+          latex,
           annotation: cmd.label(),
-          newAlg: { lhs: newLhs, rhs: newRhs },
+          newAlg: { lhs: alg.lhs, rhs: alg.rhs },
           done: false,
         };
       }
