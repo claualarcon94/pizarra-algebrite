@@ -16,8 +16,8 @@
   <div class="header">
     <span class="header-icon">🖊️</span>
     <div>
-      <h1>Pizarra de Ecuaciones e Integrales</h1>
-      <div class="header-sub">Parser simbólico · Algebrite CAS · Integrales</div>
+    <h1>Pizarra de Expresiones</h1>
+    <div class="header-sub">Parser simbólico · Algebrite CAS</div>
     </div>
     <button class="btn btn-clear" style="margin-left:auto" onclick="clearBoard()">✕ Borrar</button>
   </div>
@@ -27,7 +27,7 @@
       <div class="board-lines"></div>
       <div id="emptyState" class="empty-state">
         <div class="icon">∑</div>
-        <p>Escribe una ecuación para comenzar<br>luego da instrucciones paso a paso</p>
+        <p>Escribe una expresión para comenzar<br>luego da instrucciones paso a paso</p>
       </div>
       <div class="steps-container" id="steps"></div>
     </div>
@@ -43,7 +43,7 @@
     <div class="input-row">
       <div class="input-wrap">
         <input type="text" id="userInput"
-          placeholder="Ej: integral de x^2 dx  · o ·  3x+7=22  · o ·  simplifica"
+          placeholder="Ej: x+7x+3  ·  simplifica  ·  suma 5  ·  expande"
           autocomplete="off" spellcheck="false"/>
       </div>
       <button class="btn" onclick="handleSend()">➜ Enviar</button>
@@ -56,7 +56,7 @@
       <div class="commands-grid" id="commandsGrid"></div>
     </div>
 
-    <div class="mode-label">Motor: <span>Algebrite CAS + KaTeX</span></div>
+    <div class="mode-label">Motor: <span>Algebrite CAS + KaTeX · Modo: Expresiones</span></div>
   </div>
 
 </div>
