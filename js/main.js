@@ -163,17 +163,27 @@ function runAlg(expr) {
 function normalizeExpr(expr) {
   let result = expr.trim();
   result = result.replace(/\s+/g, '');
+  result = result.replace(/⋅/g, '*');
+  
   result = result.replace(/(\d)\(/g, '$1*(');
+  
   result = result.replace(/\)\(/g, ')*(');
-  while (/^\([^()]+\)$/.test(result)) {
-    result = result.slice(1, -1);
-  }
+  
+  result = result.replace(/([a-zA-Z])(\d)/g, '$1^$2');
+  
+  return result;
+}
+
+function cleanExpr(expr) {
+  if (!expr) return '';
+  let result = expr.replace(/\((\d+)\)/g, '$1');
   return result;
 }
 
 function toAlg(str) {
   let result = str.trim();
   result = result.replace(/\s+/g, '');
+  result = result.replace(/⋅/g, '*');
   result = result.replace(/(\d)([a-zA-Z])/g, '$1*$2');
   result = result.replace(/(\d)\(/g, '$1*(');
   result = result.replace(/\)\(/g, ')*(');
@@ -181,22 +191,21 @@ function toAlg(str) {
 }
 
 function toLatex(algExpr) {
-  if (!algExpr || algExpr.includes('latex(')) {
-    return (algExpr || '').replace(/\*/g, '').replace(/sqrt\(([^)]+)\)/g, '\\sqrt{$1}');
-  }
-  const algForLatex = algExpr.replace(/(\d)(\()/g, '$1*$2').replace(/(\))(\d)/g, '$1*$2').replace(/\)\s*\*\s*\(/g, ')*(').replace(/\)\(/g, ')(');
-  let r = runAlg(`latex(${algForLatex})`);
-  if (r) {
-    r = r.replace(/^"|"$/g, '').trim();
-    if (!r.startsWith('latex(') && !r.includes('Error') && !r.includes('Stop')) {
-      return r;
-    }
-  }
-  return algExpr
-    .replace(/\)\s*\*\s*\(/g, ')\\cdot (')
-    .replace(/\)\(/g, ')(')
-    .replace(/\*/g, '')
-    .replace(/sqrt\(([^)]+)\)/g, '\\sqrt{$1}');
+  if (!algExpr) return '';
+  
+  let latex = algExpr;
+  
+  latex = latex.replace(/\*/g, '');
+  
+  latex = latex.replace(/sqrt\(([^)]+)\)/g, '\\sqrt{$1}');
+  
+  latex = latex.replace(/\)\(/g, ')(');
+  
+  latex = latex.replace(/\((\d+)\)/g, '$1');
+  
+  latex = latex.replace(/(\w)\^(\d+)/g, '$1^{$2}');
+  
+  return latex;
 }
 
 function isExpression(text) {
@@ -241,88 +250,17 @@ function parseTerms(str) {
 }
 
 function manualExpand(expr) {
-  if (!expr.includes('(')) return null;
+  if (!expr.includes('*')) return null;
   
-  let remaining = expr;
-  let iterations = 0;
-  const maxIterations = 50;
+  const factors = expr.split('*');
+  if (factors.length < 2) return null;
   
-  while (iterations < maxIterations) {
-    iterations++;
-    
-    const parenMatch = remaining.match(/\(([^()]+)\)\s*\(/);
-    
-    if (parenMatch) {
-      const startIdx = parenMatch.index;
-      const left = parenMatch[1];
-      const afterLeft = remaining.slice(startIdx + parenMatch[0].length);
-      const rightMatch = afterLeft.match(/^([^()]+)\)/);
-      
-      if (rightMatch) {
-        const right = rightMatch[1];
-        const expanded = doExpand(left, right);
-        const before = remaining.slice(0, startIdx);
-        const after = afterLeft.slice(rightMatch[0].length);
-        remaining = before + '(' + expanded + ')' + after;
-        continue;
-      }
-    }
-    
-    const numParenMatch = remaining.match(/(\d+)\s*\*?\s*\(/);
-    if (numParenMatch) {
-      const num = numParenMatch[1];
-      const startIdx = numParenMatch.index;
-      const rest = remaining.slice(startIdx + numParenMatch[0].length);
-      const innerMatch = rest.match(/^([^()]+)\)/);
-      if (innerMatch) {
-        const inner = innerMatch[1];
-        const terms = parseTerms(inner);
-        const products = terms.map(t => runAlg(`${num}*${t}`) || `${num}*${t}`);
-        const expanded = products.join('+');
-        const before = remaining.slice(0, startIdx);
-        const after = remaining.slice(startIdx + numParenMatch[0].length + innerMatch[0].length);
-        remaining = before + expanded + after;
-        continue;
-      }
-    }
-    
-    const parenNumMatch = remaining.match(/\)\s*(\d+)$/);
-    if (parenNumMatch) {
-      const num = parenNumMatch[1];
-      const startIdx = parenNumMatch.index;
-      const before = remaining.slice(0, startIdx);
-      const parenMatch2 = before.match(/\(([^()]+)\)$/);
-      if (parenMatch2) {
-        const inner = parenMatch2[1];
-        const before2 = before.slice(0, parenMatch2.index);
-        const terms = parseTerms(inner);
-        const products = terms.map(t => runAlg(`${t}*${num}`) || `${t}*${num}`);
-        const expanded = products.join('+');
-        remaining = before2 + expanded;
-        continue;
-      }
-    }
-    
-    const starMatch = remaining.match(/\)([^*]+)\*\s*\(/);
-    if (starMatch) {
-      const startIdx = starMatch.index;
-      const before = remaining.slice(0, startIdx);
-      const rest = remaining.slice(startIdx);
-      const leftMatch = rest.match(/^([^)]+)\)\s*\*\s*\(([^()]+)\)/);
-      if (leftMatch) {
-        const left = leftMatch[1];
-        const right = leftMatch[2];
-        const after = rest.slice(leftMatch[0].length);
-        const expanded = doExpand(left, right);
-        remaining = before + '(' + expanded + ')' + after;
-        continue;
-      }
-    }
-    
-    break;
+  let result = factors[0];
+  for (let i = 1; i < factors.length; i++) {
+    result = doExpand(result, factors[i]);
   }
   
-  return { expr: remaining };
+  return { expr: result };
 }
 
 function doExpand(left, right) {
@@ -344,19 +282,21 @@ function doExpand(left, right) {
     for (const r of rightTerms) {
       if (l === '0' || r === '0') continue;
       
-      let prod = `${l}*${r}`;
-      prod = runAlg(prod) || prod;
-      
-      if (prod && prod !== '0') products.push(prod);
+      const prod = `(${l})*(${r})`;
+      const result = runAlg(prod);
+      if (result && !result.includes('Error') && !result.includes('Stop')) {
+        products.push(result);
+      } else {
+        products.push(prod);
+      }
     }
   }
   
   if (products.length === 0) return '0';
   
   let result = products.join('+');
-  if (/^\([^()]+\)$/.test(result)) {
-    result = result.slice(1, -1);
-  }
+  result = result.replace(/\+\-/g, '-');
+  result = result.replace(/\-\+/g, '-');
   return result;
 }
 
@@ -381,17 +321,18 @@ function processExpressionCommand(text, expr) {
           const wrap = v => hasVars(v) ? `(${v})` : v;
           newExpr = `${expr}${cmd.op}${wrap(valAlg)}`;
         }
+        const cleanNewExpr = cleanExpr(normalizeExpr(newExpr));
         return {
-          latex: toLatex(newExpr),
+          latex: toLatex(cleanNewExpr),
           annotation: cmd.label(rawVal),
-          newExpr: normalizeExpr(newExpr),
+          newExpr: cleanNewExpr,
           done: false,
         };
       }
 
       case 'simplify': {
         const expanded = runAlg(`expand(${expr})`);
-        const newExpr = normalizeExpr(expanded || expr);
+        const newExpr = cleanExpr(normalizeExpr(expanded || expr));
         return {
           latex: toLatex(newExpr),
           annotation: cmd.label(),
@@ -404,11 +345,11 @@ function processExpressionCommand(text, expr) {
         const result = manualExpand(expr);
         let algExpr;
         if (result) {
-          algExpr = normalizeExpr(result.expr);
+          algExpr = cleanExpr(normalizeExpr(result.expr));
         } else {
           algExpr = runAlg(`expand(${expr})`);
           if (!algExpr) return { error: 'No se pudo expandir.' };
-          algExpr = normalizeExpr(algExpr);
+          algExpr = cleanExpr(normalizeExpr(algExpr));
         }
         return {
           latex: toLatex(algExpr),
@@ -420,19 +361,29 @@ function processExpressionCommand(text, expr) {
 
       case 'factor': {
         const hasMult = /\)\s*\*\s*\(/.test(expr);
-        if (hasMult) {
+        const hasNumParen = /\d+\s*\*\s*\(/.test(expr);
+        const hasNegParen = /\)\s*\*\s*\(-/.test(expr);
+        const hasParenNeg = /\)\s*\(-/.test(expr);
+        if (hasMult || hasNumParen || hasNegParen || hasParenNeg) {
           return {
-            latex: toLatex(expr),
+            latex: toLatex(cleanExpr(expr)),
             annotation: 'Ya factorizado',
-            newExpr: normalizeExpr(expr),
+            newExpr: cleanExpr(expr),
             done: false,
           };
         }
-        const newExpr = runAlg(`factor(${expr})`);
-        if (!newExpr) return { error: 'No se pudo factorizar.' };
+        let toFactor = expr;
+        if (expr.includes('+-') || expr.includes('-+')) {
+          const simplified = runAlg(`simplify(${expr})`);
+          if (simplified && !simplified.includes('Error')) {
+            toFactor = simplified;
+          }
+        }
+        const algResult = runAlg(`factor(${toFactor})`);
+        if (!algResult || algResult.includes('Error') || algResult.includes('Stop')) return { error: 'No se pudo factorizar.' };
         return {
-          latex: toLatex(newExpr),
-          newExpr: normalizeExpr(newExpr),
+          latex: toLatex(cleanExpr(algResult)),
+          newExpr: cleanExpr(normalizeExpr(algResult)),
           annotation: cmd.label(),
           done: false,
         };
@@ -441,30 +392,33 @@ function processExpressionCommand(text, expr) {
       case 'power': {
         const exp = cmd.value || normalizeUserInput(match[cmd.valueGroup].trim());
         const newExpr = `(${expr})^(${exp})`;
+        const cleanNewExpr = cleanExpr(normalizeExpr(newExpr));
         return {
-          latex: toLatex(newExpr),
+          latex: toLatex(cleanNewExpr),
           annotation: cmd.label(exp),
-          newExpr: normalizeExpr(newExpr),
+          newExpr: cleanNewExpr,
           done: false,
         };
       }
 
       case 'sqrt': {
         const newExpr = `sqrt(${expr})`;
+        const cleanNewExpr = cleanExpr(normalizeExpr(newExpr));
         return {
-          latex: toLatex(newExpr),
+          latex: toLatex(cleanNewExpr),
           annotation: cmd.label(),
-          newExpr: normalizeExpr(newExpr),
+          newExpr: cleanNewExpr,
           done: false,
         };
       }
 
       case 'trig': {
         const newExpr = `${cmd.func}(${expr})`;
+        const cleanNewExpr = cleanExpr(normalizeExpr(newExpr));
         return {
-          latex: toLatex(newExpr),
+          latex: toLatex(cleanNewExpr),
           annotation: cmd.label(),
-          newExpr: normalizeExpr(newExpr),
+          newExpr: cleanNewExpr,
           done: false,
         };
       }
@@ -483,7 +437,7 @@ function processInstruction(text) {
   }
 
   if (isExpression(text)) {
-    const exprAlg = normalizeExpr(toAlg(text));
+    const exprAlg = cleanExpr(normalizeExpr(toAlg(text)));
     return {
       latex: toLatex(exprAlg),
       annotation: 'Expresión',
